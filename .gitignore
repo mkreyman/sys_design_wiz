@@ -1,0 +1,29 @@
+# Dependencies
+/deps/
+/_build/
+/node_modules/
+/assets/node_modules/
+
+# Static artifacts
+/priv/static/assets/
+
+# Test coverage
+/cover/
+
+# Dialyzer
+/priv/plts/*.plt
+/priv/plts/*.plt.hash
+
+# Ignore IDE configs
+.idea/
+*.iml
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Env files with secrets
+.env
+.env.local
+*.secret.exs

@@ -1,0 +1,23 @@
+# Fly.io configuration for template_app
+# Update 'app' name after running: fly apps create <your-app-name>
+app = 'template-app'
+primary_region = 'ord'
+
+[build]
+
+[env]
+  PHX_HOST = 'template-app.fly.dev'
+  PHX_SERVER = 'true'
+
+[http_service]
+  internal_port = 4000
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1

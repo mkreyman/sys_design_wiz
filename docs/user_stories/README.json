@@ -1,0 +1,21 @@
+{
+  "project": "SysDesignWiz",
+  "description": "AI Conversational Agent - Competition Sprint",
+  "created_at": "YYYY-MM-DD",
+  "timeline_mode": "sprint",
+  "version": "0.1.0",
+  "epics": [
+    {
+      "id": "epic_0",
+      "name": "Core",
+      "description": "Foundation, core conversation, and UI",
+      "status": "pending",
+      "stories": []
+    }
+  ],
+  "notes": [
+    "Sprint mode: 3-5 focused stories in a single epic",
+    "All acceptance criteria must be testable",
+    "Update story status as you implement"
+  ]
+}

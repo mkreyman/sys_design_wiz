@@ -1,0 +1,46 @@
+#!/bin/bash
+# Pre-commit hook to enforce quality checks
+
+if [ -n "$GIT_COMMIT_NO_VERIFY" ]; then
+    echo "ERROR: Pre-commit bypass detected"
+    echo "Bypassing pre-commit hooks is not allowed"
+    exit 1
+fi
+
+echo "Running pre-commit quality checks..."
+echo "================================================"
+
+# Source asdf to ensure mix is available
+if [ -f "/usr/local/opt/asdf/libexec/asdf.sh" ]; then
+  source /usr/local/opt/asdf/libexec/asdf.sh
+elif [ -f "$HOME/.asdf/asdf.sh" ]; then
+  source "$HOME/.asdf/asdf.sh"
+fi
+
+cd "$(git rev-parse --show-toplevel)"
+
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
+
+if ! mix precommit; then
+    echo "Pre-commit checks FAILED!"
+    exit 1
+fi
+
+# Re-stage files modified by mix format
+UNSTAGED_FILES=$(git diff --name-only)
+MODIFIED_STAGED_FILES=""
+
+for file in $STAGED_FILES; do
+    if [ -f "$file" ] && echo "$UNSTAGED_FILES" | grep -Fxq "$file"; then
+        MODIFIED_STAGED_FILES="$MODIFIED_STAGED_FILES $file"
+    fi
+done
+
+if [ -n "$MODIFIED_STAGED_FILES" ]; then
+    echo ""
+    echo "Re-staging formatted files..."
+    git add $MODIFIED_STAGED_FILES
+fi
+
+echo "All pre-commit checks passed!"
+exit 0
