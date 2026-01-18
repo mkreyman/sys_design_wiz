@@ -449,6 +449,12 @@ defmodule SysDesignWizWeb.ChatLive do
           <%!-- Desktop: Inline layout --%>
           <div class="hidden md:flex flex-wrap gap-6">
             <.preference_group
+              label="Runtime/Platform"
+              category="runtime"
+              options={["Elixir/OTP", "Node.js", "Go", "JVM", "Python", "Rust"]}
+              selected={@tech_preferences["runtime"] || []}
+            />
+            <.preference_group
               label="Databases"
               category="databases"
               options={["PostgreSQL", "MySQL", "MongoDB", "Redis", "DynamoDB", "Cassandra"]}
@@ -475,6 +481,13 @@ defmodule SysDesignWizWeb.ChatLive do
           </div>
           <%!-- Mobile: Accordion layout --%>
           <div class="md:hidden space-y-2">
+            <.preference_accordion
+              label="Runtime/Platform"
+              category="runtime"
+              options={["Elixir/OTP", "Node.js", "Go", "JVM", "Python", "Rust"]}
+              selected={@tech_preferences["runtime"] || []}
+              expanded={@preferences_expanded["runtime"] || false}
+            />
             <.preference_accordion
               label="Databases"
               category="databases"
@@ -1052,10 +1065,11 @@ defmodule SysDesignWizWeb.ChatLive do
   @spec default_tech_preferences() :: map()
   defp default_tech_preferences do
     %{
-      "databases" => ["PostgreSQL", "Redis"],
+      "runtime" => ["Elixir/OTP"],
+      "databases" => [],
       "caching" => [],
-      "queues" => ["Kafka"],
-      "cloud" => ["AWS"]
+      "queues" => [],
+      "cloud" => []
     }
   end
 end
