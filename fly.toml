@@ -1,12 +1,11 @@
-# Fly.io configuration for template_app
-# Update 'app' name after running: fly apps create <your-app-name>
-app = 'template-app'
+# Fly.io configuration for sys_design_wiz
+app = 'sys-design-wiz'
 primary_region = 'ord'
 
 [build]
 
 [env]
-  PHX_HOST = 'template-app.fly.dev'
+  PHX_HOST = 'sys-design-wiz.fly.dev'
   PHX_SERVER = 'true'
 
 [http_service]

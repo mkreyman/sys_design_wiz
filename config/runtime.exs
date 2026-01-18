@@ -27,18 +27,16 @@ if config_env() == :prod do
     secret_key_base: secret_key_base
 end
 
-# Claude Code SDK Configuration
-#
-# The Claude Code SDK handles authentication automatically via:
-# 1. Claude subscription (authenticate via `claude` CLI then `/login`)
-# 2. ANTHROPIC_API_KEY environment variable
-#
-# No additional configuration required here - the SDK reads from environment.
+# Anthropic API Configuration
+# Required for the LLM client in production
+if config_env() == :prod do
+  anthropic_api_key =
+    System.get_env("ANTHROPIC_API_KEY") ||
+      raise """
+      environment variable ANTHROPIC_API_KEY is missing.
+      Get your API key from https://console.anthropic.com/
+      """
 
-# Legacy OpenAI support (optional, for backwards compatibility)
-if config_env() != :test do
-  if api_key = System.get_env("OPENAI_API_KEY") do
-    config :sys_design_wiz,
-      openai_api_key: api_key
-  end
+  config :sys_design_wiz,
+    anthropic_api_key: anthropic_api_key
 end
