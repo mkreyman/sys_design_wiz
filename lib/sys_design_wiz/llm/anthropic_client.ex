@@ -31,25 +31,27 @@ defmodule SysDesignWiz.LLM.AnthropicClient do
 
   @impl true
   def chat(messages, options \\ []) do
-    api_key = get_api_key()
-    Logger.info("AnthropicClient.chat called", api_key_present: api_key != nil)
-
-    if is_nil(api_key) do
-      Logger.error("ANTHROPIC_API_KEY not found!")
-      {:error, :missing_api_key}
-    else
+    with {:ok, api_key} <- validate_api_key() do
+      Logger.info("AnthropicClient.chat called", api_key_present: true)
       do_chat(api_key, messages, options)
     end
   end
 
   @impl true
   def chat_with_tools(messages, tools, options \\ []) do
-    api_key = get_api_key()
-
-    if is_nil(api_key) do
-      {:error, :missing_api_key}
-    else
+    with {:ok, api_key} <- validate_api_key() do
       do_chat_with_tools(api_key, messages, tools, options)
+    end
+  end
+
+  defp validate_api_key do
+    case get_api_key() do
+      nil ->
+        Logger.error("ANTHROPIC_API_KEY not found!")
+        {:error, :missing_api_key}
+
+      api_key ->
+        {:ok, api_key}
     end
   end
 
@@ -111,21 +113,18 @@ defmodule SysDesignWiz.LLM.AnthropicClient do
 
   defp extract_system_from_messages(messages) do
     messages
-    |> Enum.find(fn m -> m[:role] == "system" or m["role"] == "system" end)
+    |> Enum.find(&(get_flex(&1, :role) == "system"))
     |> case do
       nil -> nil
-      msg -> msg[:content] || msg["content"]
+      msg -> get_flex(msg, :content)
     end
   end
 
   defp format_messages(messages) do
     messages
-    |> Enum.reject(fn m -> m[:role] == "system" or m["role"] == "system" end)
+    |> Enum.reject(&(get_flex(&1, :role) == "system"))
     |> Enum.map(fn msg ->
-      role = msg[:role] || msg["role"]
-      content = msg[:content] || msg["content"]
-
-      %{"role" => role, "content" => content}
+      %{"role" => get_flex(msg, :role), "content" => get_flex(msg, :content)}
     end)
   end
 
@@ -134,7 +133,7 @@ defmodule SysDesignWiz.LLM.AnthropicClient do
   end
 
   defp format_single_tool(tool) do
-    case get_key(tool, "function") || get_key(tool, :function) do
+    case get_flex(tool, :function) do
       nil -> format_anthropic_tool(tool)
       func -> format_openai_tool(func)
     end
@@ -142,23 +141,24 @@ defmodule SysDesignWiz.LLM.AnthropicClient do
 
   defp format_openai_tool(func) do
     %{
-      "name" => get_key(func, "name") || get_key(func, :name),
-      "description" => get_key(func, "description") || get_key(func, :description),
-      "input_schema" =>
-        get_key(func, "parameters") || get_key(func, :parameters) || %{"type" => "object"}
+      "name" => get_flex(func, :name),
+      "description" => get_flex(func, :description),
+      "input_schema" => get_flex(func, :parameters) || %{"type" => "object"}
     }
   end
 
   defp format_anthropic_tool(tool) do
     %{
-      "name" => get_key(tool, "name") || get_key(tool, :name),
-      "description" => get_key(tool, "description") || get_key(tool, :description),
-      "input_schema" =>
-        get_key(tool, "input_schema") || get_key(tool, :input_schema) || %{"type" => "object"}
+      "name" => get_flex(tool, :name),
+      "description" => get_flex(tool, :description),
+      "input_schema" => get_flex(tool, :input_schema) || %{"type" => "object"}
     }
   end
 
-  defp get_key(map, key), do: Map.get(map, key)
+  # Flexibly access map keys as either atoms or strings
+  defp get_flex(map, key) when is_atom(key) do
+    Map.get(map, key) || Map.get(map, Atom.to_string(key))
+  end
 
   defp make_request(api_key, body) do
     Logger.info("AnthropicClient.make_request starting",

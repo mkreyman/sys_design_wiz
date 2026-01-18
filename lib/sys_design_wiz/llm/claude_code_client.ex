@@ -136,33 +136,33 @@ defmodule SysDesignWiz.LLM.ClaudeCodeClient do
   end
 
   defp parse_tool_response(response) when is_binary(response) do
-    # Try to parse as JSON tool call
     case Jason.decode(response) do
       {:ok, %{"tool_call" => %{"name" => name, "arguments" => args}}} ->
-        # Return in OpenAI-compatible format for the agent
-        {:ok,
-         %{
-           "content" => nil,
-           "tool_calls" => [
-             %{
-               "id" => generate_tool_call_id(),
-               "type" => "function",
-               "function" => %{
-                 "name" => name,
-                 "arguments" => Jason.encode!(args)
-               }
-             }
-           ]
-         }}
+        {:ok, build_tool_call_response(name, args)}
 
       {:ok, %{"tool_calls" => tool_calls}} when is_list(tool_calls) ->
-        # Already in expected format
+        # Handles pre-formatted OpenAI-compatible responses (future-proofing)
         {:ok, %{"content" => nil, "tool_calls" => tool_calls}}
 
       _ ->
-        # Regular text response
         {:ok, %{"content" => response, "tool_calls" => nil}}
     end
+  end
+
+  defp build_tool_call_response(name, args) do
+    %{
+      "content" => nil,
+      "tool_calls" => [
+        %{
+          "id" => generate_tool_call_id(),
+          "type" => "function",
+          "function" => %{
+            "name" => name,
+            "arguments" => Jason.encode!(args)
+          }
+        }
+      ]
+    }
   end
 
   defp generate_tool_call_id do

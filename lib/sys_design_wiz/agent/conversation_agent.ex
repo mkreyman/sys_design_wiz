@@ -201,33 +201,16 @@ defmodule SysDesignWiz.Agent.ConversationAgent do
 
   defp run_tool_loop(client, messages, tools, tool_map, iteration) do
     case client.chat_with_tools(messages, tools, []) do
-      {:ok, %{"content" => content, "tool_calls" => nil}} ->
-        clean_content = strip_surrounding_quotes(content)
-        {:ok, clean_content, messages ++ [%{role: Roles.assistant(), content: clean_content}]}
-
-      {:ok, %{"content" => content, "tool_calls" => []}} when is_binary(content) ->
-        # Empty tool_calls list with content - treat as final response
-        clean_content = strip_surrounding_quotes(content)
-        {:ok, clean_content, messages ++ [%{role: Roles.assistant(), content: clean_content}]}
-
-      {:ok, %{"content" => content}} when is_binary(content) and content != "" ->
-        clean_content = strip_surrounding_quotes(content)
-        {:ok, clean_content, messages ++ [%{role: Roles.assistant(), content: clean_content}]}
-
       {:ok, %{"tool_calls" => tool_calls} = response}
       when is_list(tool_calls) and tool_calls != [] ->
-        # Add assistant message with tool calls to history
         assistant_message = build_assistant_tool_message(response)
-        messages = messages ++ [assistant_message]
-
-        # Execute each tool call
         tool_results = Enum.map(tool_calls, &execute_tool_call(&1, tool_map))
+        updated_messages = messages ++ [assistant_message] ++ tool_results
 
-        # Add tool results to messages
-        messages = messages ++ tool_results
+        run_tool_loop(client, updated_messages, tools, tool_map, iteration + 1)
 
-        # Continue the loop
-        run_tool_loop(client, messages, tools, tool_map, iteration + 1)
+      {:ok, %{"content" => content}} when is_binary(content) and content != "" ->
+        build_final_response(content, messages)
 
       {:ok, %{"content" => nil}} ->
         {:ok, "", messages}
@@ -235,6 +218,11 @@ defmodule SysDesignWiz.Agent.ConversationAgent do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  defp build_final_response(content, messages) do
+    clean_content = strip_surrounding_quotes(content)
+    {:ok, clean_content, messages ++ [%{role: Roles.assistant(), content: clean_content}]}
   end
 
   defp build_assistant_tool_message(%{"tool_calls" => tool_calls} = response) do
@@ -328,7 +316,6 @@ defmodule SysDesignWiz.Agent.ConversationAgent do
     Application.get_env(:sys_design_wiz, :llm_client, SysDesignWiz.LLM.OpenAIClient)
   end
 
-  defp strip_surrounding_quotes(nil), do: nil
   defp strip_surrounding_quotes(""), do: ""
 
   defp strip_surrounding_quotes(content) when is_binary(content) do

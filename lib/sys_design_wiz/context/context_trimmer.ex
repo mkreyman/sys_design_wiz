@@ -44,16 +44,19 @@ defmodule SysDesignWiz.Context.ContextTrimmer do
     max = Keyword.get(opts, :max_messages, max_messages())
     preserve_system = Keyword.get(opts, :preserve_system_prompt, true)
 
-    cond do
-      length(messages) <= max ->
-        messages
+    do_trim(messages, max, preserve_system)
+  end
 
-      preserve_system and match?([%{role: "system"} | _], messages) ->
-        trim_with_system_prompt(messages, max)
+  defp do_trim(messages, max, _preserve_system) when length(messages) <= max do
+    messages
+  end
 
-      true ->
-        Enum.take(messages, -max)
-    end
+  defp do_trim([%{role: "system"} | _] = messages, max, true) do
+    trim_with_system_prompt(messages, max)
+  end
+
+  defp do_trim(messages, max, _preserve_system) do
+    Enum.take(messages, -max)
   end
 
   @doc """

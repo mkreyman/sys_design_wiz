@@ -44,19 +44,22 @@ defmodule SysDesignWiz.Diagram.MermaidSanitizer do
   """
   @spec validate(String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def validate(code) when is_binary(code) do
-    cond do
-      String.trim(code) == "" ->
-        {:error, "Empty diagram code"}
-
-      not has_diagram_type?(code) ->
-        {:error, "Missing diagram type declaration (flowchart, graph, sequence, etc.)"}
-
-      true ->
-        {:ok, code}
-    end
+    code
+    |> String.trim()
+    |> do_validate(code)
   end
 
   def validate(_), do: {:error, "Invalid input"}
+
+  defp do_validate("", _original), do: {:error, "Empty diagram code"}
+
+  defp do_validate(_trimmed, original) do
+    if has_diagram_type?(original) do
+      {:ok, original}
+    else
+      {:error, "Missing diagram type declaration (flowchart, graph, sequence, etc.)"}
+    end
+  end
 
   # Private functions
 

@@ -30,59 +30,58 @@ defmodule SysDesignWizWeb.ChatLive do
   @impl true
   @spec mount(map(), map(), Phoenix.LiveView.Socket.t()) :: {:ok, Phoenix.LiveView.Socket.t()}
   def mount(_params, _session, socket) do
-    socket =
-      socket
-      |> assign(:session_id, nil)
-      |> assign(:agent, nil)
-      |> assign(:agent_ref, nil)
-      |> assign(:messages, [])
-      |> assign(:input_value, "")
-      |> assign(:loading, false)
-      |> assign(:diagram_code, nil)
-      |> assign(:diagram_loading, false)
-      |> assign(:show_raw_diagram, false)
-      |> assign(:voice_active, false)
-      |> assign(:voice_processing, false)
-      |> assign(:voice_supported, true)
-      |> assign(:voice_transcript, "")
-      |> assign(:voice_editing, false)
-      |> assign(:tech_preferences, default_tech_preferences())
-      |> assign(:show_preferences, false)
-      |> assign(:preferences_expanded, %{})
+    socket = assign_initial_state(socket)
 
     if connected?(socket) do
-      session_id = generate_session_id()
-
-      case start_supervised_agent(session_id, socket.assigns.tech_preferences) do
-        {:ok, agent} ->
-          ref = Process.monitor(agent)
-
-          Logger.info("Started agent for session",
-            session_id: session_id,
-            agent_pid: inspect(agent)
-          )
-
-          socket =
-            socket
-            |> assign(:session_id, session_id)
-            |> assign(:agent, agent)
-            |> assign(:agent_ref, ref)
-
-          {:ok, socket}
-
-        {:error, reason} ->
-          Logger.error("Failed to start agent",
-            session_id: session_id,
-            error: inspect(reason)
-          )
-
-          {:ok,
-           assign(socket, :messages, [
-             create_message("system", "Failed to start agent: #{inspect(reason)}")
-           ])}
-      end
+      {:ok, initialize_agent(socket)}
     else
       {:ok, socket}
+    end
+  end
+
+  defp assign_initial_state(socket) do
+    assign(socket,
+      session_id: nil,
+      agent: nil,
+      agent_ref: nil,
+      messages: [],
+      input_value: "",
+      loading: false,
+      diagram_code: nil,
+      diagram_loading: false,
+      show_raw_diagram: false,
+      voice_active: false,
+      voice_processing: false,
+      voice_supported: true,
+      voice_transcript: "",
+      voice_editing: false,
+      tech_preferences: default_tech_preferences(),
+      show_preferences: false,
+      preferences_expanded: %{}
+    )
+  end
+
+  defp initialize_agent(socket) do
+    session_id = generate_session_id()
+
+    case start_supervised_agent(session_id, socket.assigns.tech_preferences) do
+      {:ok, agent} ->
+        ref = Process.monitor(agent)
+
+        Logger.info("Started agent for session",
+          session_id: session_id,
+          agent_pid: inspect(agent)
+        )
+
+        assign(socket, session_id: session_id, agent: agent, agent_ref: ref)
+
+      {:error, reason} ->
+        Logger.error("Failed to start agent", session_id: session_id, error: inspect(reason))
+
+        append_message(
+          socket,
+          create_message("system", "Failed to start agent: #{inspect(reason)}")
+        )
     end
   end
 
@@ -274,7 +273,7 @@ defmodule SysDesignWizWeb.ChatLive do
 
         socket =
           socket
-          |> update(:messages, &(&1 ++ [assistant_message]))
+          |> append_message(assistant_message)
           |> assign(:loading, false)
           |> assign(:diagram_loading, false)
           |> assign(:diagram_code, diagram_code)
@@ -291,7 +290,7 @@ defmodule SysDesignWizWeb.ChatLive do
 
         socket =
           socket
-          |> update(:messages, &(&1 ++ [error_message]))
+          |> append_message(error_message)
           |> assign(:loading, false)
           |> assign(:diagram_loading, false)
 
@@ -312,7 +311,7 @@ defmodule SysDesignWizWeb.ChatLive do
         "Agent disconnected (#{inspect(reason)}). Attempting to restart..."
       )
 
-    socket = update(socket, :messages, &(&1 ++ [error_message]))
+    socket = append_message(socket, error_message)
 
     case start_supervised_agent(socket.assigns.session_id, socket.assigns.tech_preferences) do
       {:ok, new_agent} ->
@@ -330,7 +329,7 @@ defmodule SysDesignWizWeb.ChatLive do
           |> assign(:agent, new_agent)
           |> assign(:agent_ref, new_ref)
           |> assign(:loading, false)
-          |> update(:messages, &(&1 ++ [recovery_message]))
+          |> append_message(recovery_message)
 
         {:noreply, socket}
 
@@ -342,7 +341,7 @@ defmodule SysDesignWizWeb.ChatLive do
           socket
           |> assign(:agent, nil)
           |> assign(:loading, false)
-          |> update(:messages, &(&1 ++ [failure_message]))
+          |> append_message(failure_message)
 
         {:noreply, socket}
     end
@@ -1001,6 +1000,11 @@ defmodule SysDesignWizWeb.ChatLive do
     %{role: role, content: content, timestamp: DateTime.utc_now()}
   end
 
+  @spec append_message(Phoenix.LiveView.Socket.t(), message()) :: Phoenix.LiveView.Socket.t()
+  defp append_message(socket, message) do
+    update(socket, :messages, &(&1 ++ [message]))
+  end
+
   @spec send_user_message(Phoenix.LiveView.Socket.t(), String.t()) ::
           {:noreply, Phoenix.LiveView.Socket.t()}
   defp send_user_message(socket, message) do
@@ -1009,7 +1013,7 @@ defmodule SysDesignWizWeb.ChatLive do
 
       socket =
         socket
-        |> update(:messages, &(&1 ++ [user_message]))
+        |> append_message(user_message)
         |> assign(:input_value, "")
         |> assign(:loading, true)
         |> assign(:voice_transcript, "")
