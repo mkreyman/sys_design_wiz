@@ -90,6 +90,9 @@ ENV MIX_ENV="prod"
 # Only copy the final release from the build stage
 COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/sys_design_wiz ./
 
+# Ensure release scripts are executable
+RUN chmod +x /app/bin/*
+
 USER nobody
 
 # If using an environment that doesn't automatically reap zombie processes, it is
