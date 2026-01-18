@@ -2,4 +2,4 @@
 set -eu
 
 cd -P -- "$(dirname -- "$0")"
-PHX_SERVER=true exec ./template_app start
+PHX_SERVER=true exec ./sys_design_wiz start
