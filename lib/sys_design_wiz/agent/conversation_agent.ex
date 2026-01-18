@@ -58,9 +58,12 @@ defmodule SysDesignWiz.Agent.ConversationAgent do
   - `{:ok, response}` on success
   - `{:error, reason}` on failure
   """
+  # Timeout must be longer than the LLM client's receive_timeout (60s)
+  @chat_timeout 65_000
+
   @spec chat(agent(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def chat(agent, message) do
-    GenServer.call(agent, {:chat, message}, 30_000)
+    GenServer.call(agent, {:chat, message}, @chat_timeout)
   end
 
   @doc """
@@ -118,6 +121,11 @@ defmodule SysDesignWiz.Agent.ConversationAgent do
 
   @impl true
   def handle_call({:chat, user_message}, _from, state) do
+    Logger.debug("ConversationAgent.handle_call :chat received",
+      user_message_length: String.length(user_message),
+      llm_client: state.llm_client
+    )
+
     state = update_in(state.memory, &SimpleMemory.add_message(&1, Roles.user(), user_message))
 
     messages =
@@ -125,7 +133,19 @@ defmodule SysDesignWiz.Agent.ConversationAgent do
       |> SimpleMemory.get_messages()
       |> maybe_trim_context()
 
-    case state.llm_client.chat(messages, []) do
+    Logger.debug("ConversationAgent calling llm_client.chat",
+      message_count: length(messages),
+      llm_client: state.llm_client
+    )
+
+    start_time = System.monotonic_time(:millisecond)
+
+    result = state.llm_client.chat(messages, [])
+
+    elapsed = System.monotonic_time(:millisecond) - start_time
+    Logger.debug("ConversationAgent llm_client.chat returned", elapsed_ms: elapsed)
+
+    case result do
       {:ok, response} ->
         state =
           update_in(state.memory, &SimpleMemory.add_message(&1, Roles.assistant(), response))

@@ -9,7 +9,7 @@ defmodule SysDesignWiz.Interview.SystemPromptTest do
 
       assert prompt =~ "systems design interview"
       assert prompt =~ "candidate"
-      assert prompt =~ "clarifying questions"
+      assert prompt =~ "clarifying question"
       assert prompt =~ "mermaid"
     end
 

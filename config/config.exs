@@ -2,8 +2,8 @@ import Config
 
 config :sys_design_wiz,
   generators: [timestamp_type: :utc_datetime],
-  # Default to Claude Code SDK client (can be overridden in env configs)
-  llm_client: SysDesignWiz.LLM.ClaudeCodeClient
+  # Use direct Anthropic HTTP client (better for web apps than CLI-based SDK)
+  llm_client: SysDesignWiz.LLM.AnthropicClient
 
 config :sys_design_wiz, SysDesignWizWeb.Endpoint,
   url: [host: "localhost"],

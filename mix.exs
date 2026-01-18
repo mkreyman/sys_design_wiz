@@ -58,6 +58,9 @@ defmodule SysDesignWiz.MixProject do
       # HTML sanitization (XSS prevention)
       {:html_sanitize_ex, "~> 1.4"},
 
+      # Logging
+      {:logger_json, "~> 6.0"},
+
       # Quality tools
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},

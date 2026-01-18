@@ -21,7 +21,22 @@ config :sys_design_wiz, SysDesignWizWeb.Endpoint,
 
 config :sys_design_wiz, dev_routes: true
 
-config :logger, :console, format: "[$level] $message\n"
+# Set log level to debug for tracing
+config :logger, level: :debug
+
+# Use JSON formatter in dev for structured logging
+# Logs are written to logs/dev.log for easy debugging
+config :logger, :default_handler,
+  formatter: {LoggerJSON.Formatters.Basic, metadata: :all},
+  config: [
+    file: ~c"logs/dev.log",
+    filesync_repeat_interval: 5000,
+    file_check: 5000,
+    max_no_bytes: 10_000_000,
+    # 10 MB
+    max_no_files: 5,
+    compress_on_rotate: true
+  ]
 
 config :phoenix, :stacktrace_depth, 20
 

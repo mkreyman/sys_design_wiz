@@ -234,9 +234,22 @@ defmodule SysDesignWizWeb.ChatLive do
 
   @impl true
   def handle_info({:chat, message}, socket) do
+    Logger.debug("ChatLive handle_info :chat received",
+      message_length: String.length(message),
+      agent: inspect(socket.assigns.agent)
+    )
+
     socket = assign(socket, :diagram_loading, true)
 
-    case ConversationAgent.chat(socket.assigns.agent, message) do
+    Logger.debug("ChatLive calling ConversationAgent.chat")
+    start_time = System.monotonic_time(:millisecond)
+
+    result = ConversationAgent.chat(socket.assigns.agent, message)
+
+    elapsed = System.monotonic_time(:millisecond) - start_time
+    Logger.debug("ChatLive ConversationAgent.chat returned", elapsed_ms: elapsed)
+
+    case result do
       {:ok, response} ->
         Logger.info("Received chat response",
           session_id: socket.assigns.session_id,
