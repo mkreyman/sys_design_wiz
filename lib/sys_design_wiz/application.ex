@@ -8,11 +8,15 @@ defmodule SysDesignWiz.Application do
     # Ensure database directory exists
     ensure_data_directory()
 
+    # Run migrations before starting the supervision tree
+    # This ensures Oban tables exist before Oban starts
+    run_migrations()
+
     children = [
       SysDesignWizWeb.Telemetry,
       # SQLite repository for session persistence
       SysDesignWiz.Repo,
-      # Background job processing
+      # Background job processing (requires oban_jobs table from migrations)
       {Oban, Application.fetch_env!(:sys_design_wiz, Oban)},
       {DNSCluster, query: Application.get_env(:sys_design_wiz, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: SysDesignWiz.PubSub},
@@ -24,12 +28,7 @@ defmodule SysDesignWiz.Application do
     ]
 
     opts = [strategy: :one_for_one, name: SysDesignWiz.Supervisor]
-    result = Supervisor.start_link(children, opts)
-
-    # Run migrations after Repo is started
-    run_migrations()
-
-    result
+    Supervisor.start_link(children, opts)
   end
 
   defp ensure_data_directory do
@@ -46,12 +45,11 @@ defmodule SysDesignWiz.Application do
   defp run_migrations do
     # Run Ecto migrations automatically on startup
     # This ensures the database schema is always up-to-date
-    Ecto.Migrator.run(
-      SysDesignWiz.Repo,
-      Application.app_dir(:sys_design_wiz, "priv/repo/migrations"),
-      :up,
-      all: true
-    )
+    # Uses with_repo to start Repo temporarily for migrations
+    {:ok, _, _} =
+      Ecto.Migrator.with_repo(SysDesignWiz.Repo, fn repo ->
+        Ecto.Migrator.run(repo, :up, all: true)
+      end)
   end
 
   @impl true
