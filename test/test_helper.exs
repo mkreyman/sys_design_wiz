@@ -4,6 +4,9 @@ ExUnit.start(capture_log: true)
 # This starts the ownership server required for ClaudeCode.Test.stub/2
 Supervisor.start_link([ClaudeCode.Test], strategy: :one_for_one)
 
+# Start the Ecto sandbox for test isolation
+Ecto.Adapters.SQL.Sandbox.mode(SysDesignWiz.Repo, :manual)
+
 # Note: Mox mocks are defined in test/support/mocks.ex to avoid redefinition warnings
 
 # Configure app to use mock clients in tests

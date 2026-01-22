@@ -1,15 +1,30 @@
 defmodule SysDesignWiz.Agent.ConversationAgentTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   import Mox
 
+  alias Ecto.Adapters.SQL.Sandbox
   alias SysDesignWiz.Agent.ConversationAgent
   alias SysDesignWiz.LLM.MockClient
+  alias SysDesignWiz.Repo
+
+  setup do
+    :ok = Sandbox.checkout(Repo)
+    # Allow spawned processes to use the connection
+    Sandbox.mode(Repo, {:shared, self()})
+    :ok
+  end
 
   setup :verify_on_exit!
 
+  # Generate a unique session ID for each test
+  defp unique_session_id do
+    :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)
+  end
+
   # Helper to start agent and allow mock access
   defp start_agent(opts \\ []) do
+    opts = Keyword.put_new(opts, :session_id, unique_session_id())
     {:ok, agent} = ConversationAgent.start_link(opts)
     Mox.allow(MockClient, self(), agent)
     {:ok, agent}
@@ -17,7 +32,7 @@ defmodule SysDesignWiz.Agent.ConversationAgentTest do
 
   describe "start_link/1" do
     test "starts a conversation agent" do
-      assert {:ok, pid} = ConversationAgent.start_link()
+      assert {:ok, pid} = ConversationAgent.start_link(session_id: unique_session_id())
       assert Process.alive?(pid)
     end
 
@@ -70,7 +85,7 @@ defmodule SysDesignWiz.Agent.ConversationAgentTest do
 
   describe "get_history/1" do
     test "returns empty history for new agent" do
-      {:ok, agent} = ConversationAgent.start_link()
+      {:ok, agent} = ConversationAgent.start_link(session_id: unique_session_id())
       history = ConversationAgent.get_history(agent)
 
       # Should only have system message

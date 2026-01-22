@@ -5,6 +5,17 @@ if System.get_env("PHX_SERVER") do
   config :sys_design_wiz, SysDesignWizWeb.Endpoint, server: true
 end
 
+# SQLite database path - use /app/data in production (Fly.io volume mount)
+if config_env() == :prod do
+  database_path =
+    System.get_env("DATABASE_PATH") ||
+      "/app/data/sessions.db"
+
+  config :sys_design_wiz, SysDesignWiz.Repo,
+    database: database_path,
+    pool_size: 5
+end
+
 if config_env() == :prod do
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") ||

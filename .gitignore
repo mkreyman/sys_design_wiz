@@ -31,3 +31,6 @@ Thumbs.db
 .env
 .env.local
 *.secret.exs
+
+# SQLite database files
+priv/data/

@@ -1051,7 +1051,7 @@ defmodule SysDesignWizWeb.ChatLive do
 
     child_spec = {
       ConversationAgent,
-      name: via_tuple(session_id), system_prompt: system_prompt
+      session_id: session_id, name: via_tuple(session_id), system_prompt: system_prompt
     }
 
     DynamicSupervisor.start_child(SysDesignWiz.AgentSupervisor, child_spec)

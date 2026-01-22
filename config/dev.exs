@@ -1,5 +1,11 @@
 import Config
 
+# SQLite database for session persistence
+config :sys_design_wiz, SysDesignWiz.Repo,
+  database: Path.expand("../priv/data/sessions_dev.db", __DIR__),
+  pool_size: 5,
+  show_sensitive_data_on_connection_error: true
+
 config :sys_design_wiz, SysDesignWizWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4000],
   check_origin: false,

@@ -1,5 +1,14 @@
 import Config
 
+# SQLite database for tests - use separate file per test run
+config :sys_design_wiz, SysDesignWiz.Repo,
+  database: Path.expand("../priv/data/sessions_test.db", __DIR__),
+  pool_size: 5,
+  pool: Ecto.Adapters.SQL.Sandbox
+
+# Disable Oban in tests
+config :sys_design_wiz, Oban, testing: :inline
+
 config :sys_design_wiz, SysDesignWizWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
   secret_key_base:

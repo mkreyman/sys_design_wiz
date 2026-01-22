@@ -12,13 +12,14 @@ defmodule SysDesignWiz.Agent.ConversationAgent do
 
   alias SysDesignWiz.Constants.Roles
   alias SysDesignWiz.Context.ContextTrimmer
-  alias SysDesignWiz.Context.SimpleMemory
+  alias SysDesignWiz.Context.SqliteMemory
   alias SysDesignWiz.Tools.ToolBehaviour
 
   @type agent :: pid() | atom() | {:via, module(), term()}
   @type message :: %{role: String.t(), content: String.t()}
   @type state :: %{
-          memory: SimpleMemory.t(),
+          memory: term(),
+          memory_module: module(),
           llm_client: module(),
           tools: [module()],
           tool_map: %{String.t() => module()}
@@ -36,7 +37,9 @@ defmodule SysDesignWiz.Agent.ConversationAgent do
   Starts a new conversation agent.
 
   ## Options
+  - `:session_id` - Unique session identifier for persistence (required)
   - `:system_prompt` - Custom system prompt (optional)
+  - `:memory_module` - Memory implementation module (optional, default: SqliteMemory)
   - `:tools` - List of tool modules implementing ToolBehaviour (optional)
   - `:llm_client` - Custom LLM client module (optional, for testing)
   - `:name` - GenServer name for registration
@@ -105,18 +108,27 @@ defmodule SysDesignWiz.Agent.ConversationAgent do
 
   @impl true
   def init(opts) do
+    session_id = Keyword.fetch!(opts, :session_id)
     system_prompt = Keyword.get(opts, :system_prompt, @default_system_prompt)
+    memory_module = Keyword.get(opts, :memory_module, SqliteMemory)
     client = Keyword.get(opts, :llm_client, llm_client())
     tools = Keyword.get(opts, :tools, [])
 
-    state = %{
-      memory: SimpleMemory.new(system_prompt),
-      llm_client: client,
-      tools: tools,
-      tool_map: build_tool_map(tools)
-    }
+    case memory_module.new(session_id, system_prompt) do
+      {:ok, memory} ->
+        state = %{
+          memory: memory,
+          memory_module: memory_module,
+          llm_client: client,
+          tools: tools,
+          tool_map: build_tool_map(tools)
+        }
 
-    {:ok, state}
+        {:ok, state}
+
+      {:error, reason} ->
+        {:stop, reason}
+    end
   end
 
   @impl true
@@ -126,70 +138,89 @@ defmodule SysDesignWiz.Agent.ConversationAgent do
       llm_client: state.llm_client
     )
 
-    state = update_in(state.memory, &SimpleMemory.add_message(&1, Roles.user(), user_message))
+    memory_mod = state.memory_module
 
-    messages =
-      state.memory
-      |> SimpleMemory.get_messages()
-      |> maybe_trim_context()
+    with {:ok, memory} <- memory_mod.add_message(state.memory, Roles.user(), user_message) do
+      state = %{state | memory: memory}
 
-    Logger.debug("ConversationAgent calling llm_client.chat",
-      message_count: length(messages),
-      llm_client: state.llm_client
-    )
+      messages =
+        state.memory
+        |> memory_mod.get_messages()
+        |> maybe_trim_context()
 
-    start_time = System.monotonic_time(:millisecond)
+      Logger.debug("ConversationAgent calling llm_client.chat",
+        message_count: length(messages),
+        llm_client: state.llm_client
+      )
 
-    result = state.llm_client.chat(messages, [])
+      start_time = System.monotonic_time(:millisecond)
 
-    elapsed = System.monotonic_time(:millisecond) - start_time
-    Logger.debug("ConversationAgent llm_client.chat returned", elapsed_ms: elapsed)
+      result = state.llm_client.chat(messages, [])
 
-    case result do
-      {:ok, response} ->
-        state =
-          update_in(state.memory, &SimpleMemory.add_message(&1, Roles.assistant(), response))
+      elapsed = System.monotonic_time(:millisecond) - start_time
+      Logger.debug("ConversationAgent llm_client.chat returned", elapsed_ms: elapsed)
 
-        {:reply, {:ok, response}, state}
+      case result do
+        {:ok, response} ->
+          case memory_mod.add_message(state.memory, Roles.assistant(), response) do
+            {:ok, memory} ->
+              {:reply, {:ok, response}, %{state | memory: memory}}
 
-      {:error, reason} = error ->
-        Logger.error("LLM chat failed: #{inspect(reason)}")
-        {:reply, error, state}
+            {:error, reason} ->
+              Logger.error("Failed to save assistant message: #{inspect(reason)}")
+              {:reply, {:ok, response}, state}
+          end
+
+        {:error, reason} = error ->
+          Logger.error("LLM chat failed: #{inspect(reason)}")
+          {:reply, error, state}
+      end
+    else
+      {:error, reason} ->
+        Logger.error("Failed to save user message: #{inspect(reason)}")
+        {:reply, {:error, reason}, state}
     end
   end
 
   @impl true
   def handle_call({:chat_with_tools, user_message}, _from, state) do
-    state = update_in(state.memory, &SimpleMemory.add_message(&1, Roles.user(), user_message))
+    memory_mod = state.memory_module
 
-    messages =
-      state.memory
-      |> SimpleMemory.get_messages()
-      |> maybe_trim_context()
+    with {:ok, memory} <- memory_mod.add_message(state.memory, Roles.user(), user_message) do
+      state = %{state | memory: memory}
 
-    openai_tools = Enum.map(state.tools, &ToolBehaviour.to_openai_tool/1)
+      messages =
+        state.memory
+        |> memory_mod.get_messages()
+        |> maybe_trim_context()
 
-    case run_tool_loop(state.llm_client, messages, openai_tools, state.tool_map, 0) do
-      {:ok, response, updated_messages} ->
-        state = save_tool_conversation(state, updated_messages)
-        {:reply, {:ok, response}, state}
+      openai_tools = Enum.map(state.tools, &ToolBehaviour.to_openai_tool/1)
 
-      {:error, reason} = error ->
-        Logger.error("LLM chat with tools failed: #{inspect(reason)}")
-        {:reply, error, state}
+      case run_tool_loop(state.llm_client, messages, openai_tools, state.tool_map, 0) do
+        {:ok, response, updated_messages} ->
+          state = save_tool_conversation(state, updated_messages)
+          {:reply, {:ok, response}, state}
+
+        {:error, reason} = error ->
+          Logger.error("LLM chat with tools failed: #{inspect(reason)}")
+          {:reply, error, state}
+      end
+    else
+      {:error, reason} ->
+        Logger.error("Failed to save user message: #{inspect(reason)}")
+        {:reply, {:error, reason}, state}
     end
   end
 
   @impl true
   def handle_call(:get_history, _from, state) do
-    {:reply, SimpleMemory.get_messages(state.memory), state}
+    {:reply, state.memory_module.get_messages(state.memory), state}
   end
 
   @impl true
   def handle_call(:clear_history, _from, state) do
-    system_prompt = SimpleMemory.get_system_prompt(state.memory)
-    state = put_in(state.memory, SimpleMemory.new(system_prompt))
-    {:reply, :ok, state}
+    {:ok, memory} = state.memory_module.clear_history(state.memory)
+    {:reply, :ok, %{state | memory: memory}}
   end
 
   # Tool Execution Loop
@@ -287,6 +318,8 @@ defmodule SysDesignWiz.Agent.ConversationAgent do
   defp save_tool_conversation(state, messages) do
     # Extract only user/assistant messages for clean history
     # Skip the system message (already in memory) and tool-related messages
+    memory_mod = state.memory_module
+
     new_messages =
       messages
       |> Enum.drop(1)
@@ -295,7 +328,10 @@ defmodule SysDesignWiz.Agent.ConversationAgent do
       end)
 
     Enum.reduce(new_messages, state, fn msg, acc ->
-      update_in(acc.memory, &SimpleMemory.add_message(&1, msg.role, msg.content || ""))
+      case memory_mod.add_message(acc.memory, msg.role, msg.content || "") do
+        {:ok, memory} -> %{acc | memory: memory}
+        {:error, _reason} -> acc
+      end
     end)
   end
 

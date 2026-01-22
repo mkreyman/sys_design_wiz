@@ -10,6 +10,8 @@ defmodule SysDesignWizWeb.ConnCase do
 
   use ExUnit.CaseTemplate
 
+  alias Ecto.Adapters.SQL.Sandbox
+
   using do
     quote do
       # The default endpoint for testing
@@ -25,7 +27,14 @@ defmodule SysDesignWizWeb.ConnCase do
     end
   end
 
-  setup _tags do
+  setup tags do
+    # Checkout the Ecto sandbox for database access
+    :ok = Sandbox.checkout(SysDesignWiz.Repo)
+
+    unless tags[:async] do
+      Sandbox.mode(SysDesignWiz.Repo, {:shared, self()})
+    end
+
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 end

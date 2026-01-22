@@ -1,9 +1,25 @@
 import Config
 
 config :sys_design_wiz,
+  ecto_repos: [SysDesignWiz.Repo],
   generators: [timestamp_type: :utc_datetime],
   # Use direct Anthropic HTTP client (better for web apps than CLI-based SDK)
   llm_client: SysDesignWiz.LLM.AnthropicClient
+
+# Oban configuration for background jobs
+config :sys_design_wiz, Oban,
+  engine: Oban.Engines.Lite,
+  repo: SysDesignWiz.Repo,
+  queues: [default: 10, maintenance: 5],
+  plugins: [
+    # Prune completed jobs after 1 hour
+    {Oban.Plugins.Pruner, max_age: 3600},
+    # Run session cleanup daily at 3 AM UTC
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"0 3 * * *", SysDesignWiz.Workers.SessionCleanupWorker}
+     ]}
+  ]
 
 config :sys_design_wiz, SysDesignWizWeb.Endpoint,
   url: [host: "localhost"],

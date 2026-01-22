@@ -1,5 +1,5 @@
 defmodule SysDesignWizWeb.ChatLiveTest do
-  use SysDesignWizWeb.ConnCase, async: true
+  use SysDesignWizWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
   import Mox
