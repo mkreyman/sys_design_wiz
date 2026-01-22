@@ -1,4 +1,4 @@
-# Find eligible builder and runner images on Docker Hub. We use Ubuntu/Debian
+# Find eligible builder and runner images on Docker Hub. We use Ubuntu
 # instead of Alpine to avoid DNS resolution issues in production.
 #
 # https://hub.docker.com/r/hexpm/elixir/tags?page=1&name=ubuntu
@@ -7,18 +7,18 @@
 # This file is based on these images:
 #
 #   - https://hub.docker.com/r/hexpm/elixir/tags - for the build image
-#   - https://hub.docker.com/_/debian?tab=tags&page=1&name=bookworm-20250113-slim - for the release image
+#   - https://hub.docker.com/_/ubuntu - for the release image
 #   - https://pkgs.org/ - resource for finding needed packages
-#   - Ex: hexpm/elixir:1.18.4-erlang-27.2.4-debian-bookworm-20250113-slim
+#   - Ex: hexpm/elixir:1.18.1-erlang-27.2.2-ubuntu-jammy-20260109
 #
-# Note: Using Bookworm (Debian 12) for glibc 2.36+ required by exqlite NIF
+# Note: Using Ubuntu Jammy (22.04) for glibc 2.35 required by exqlite NIF
 #
-ARG ELIXIR_VERSION=1.18.4
-ARG OTP_VERSION=27.2.4
-ARG DEBIAN_VERSION=bookworm-20250113-slim
+ARG ELIXIR_VERSION=1.18.1
+ARG OTP_VERSION=27.2.2
+ARG UBUNTU_VERSION=jammy-20260109
 
-ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
-ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
+ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-ubuntu-${UBUNTU_VERSION}"
+ARG RUNNER_IMAGE="ubuntu:${UBUNTU_VERSION}"
 
 FROM ${BUILDER_IMAGE} as builder
 
