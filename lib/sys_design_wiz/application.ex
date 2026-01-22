@@ -16,8 +16,8 @@ defmodule SysDesignWiz.Application do
       SysDesignWizWeb.Telemetry,
       # SQLite repository for session persistence
       SysDesignWiz.Repo,
-      # Background job processing (requires oban_jobs table from migrations)
-      {Oban, Application.fetch_env!(:sys_design_wiz, Oban)},
+      # Daily session cleanup scheduler
+      SysDesignWiz.Workers.SessionCleanupScheduler,
       {DNSCluster, query: Application.get_env(:sys_design_wiz, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: SysDesignWiz.PubSub},
       {Registry, keys: :unique, name: SysDesignWiz.AgentRegistry},

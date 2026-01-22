@@ -64,9 +64,6 @@ defmodule SysDesignWiz.MixProject do
       # SQLite database for session persistence
       {:ecto_sqlite3, "~> 0.17"},
 
-      # Background job processing
-      {:oban, "~> 2.18"},
-
       # Quality tools
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
