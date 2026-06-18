@@ -24,6 +24,8 @@ defmodule SysDesignWiz.Application do
       {DynamicSupervisor, name: SysDesignWiz.AgentSupervisor, strategy: :one_for_one},
       # Circuit breaker for OpenAI API calls
       {SysDesignWiz.LLM.CircuitBreaker, name: SysDesignWiz.LLM.CircuitBreaker},
+      # Evergreen Anthropic model resolver (avoids 404s from retired model ids)
+      SysDesignWiz.LLM.ModelResolver,
       SysDesignWizWeb.Endpoint
     ]
 

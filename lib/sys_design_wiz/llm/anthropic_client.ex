@@ -24,9 +24,12 @@ defmodule SysDesignWiz.LLM.AnthropicClient do
 
   require Logger
 
+  alias SysDesignWiz.LLM.ModelResolver
+
   @api_url "https://api.anthropic.com/v1/messages"
   @api_version "2023-06-01"
-  @default_model "claude-sonnet-4-20250514"
+  # The live default model is resolved (newest Sonnet) by ModelResolver; see
+  # default_model/1. No hardcoded dated default that could be retired.
   @default_max_tokens 4096
 
   @impl true
@@ -58,13 +61,13 @@ defmodule SysDesignWiz.LLM.AnthropicClient do
   defp do_chat(api_key, messages, options) do
     Logger.info("AnthropicClient.do_chat starting", message_count: length(messages))
     system_prompt = Keyword.get(options, :system_prompt)
-    model = Keyword.get(options, :model, @default_model)
+    model = Keyword.get(options, :model, default_model(api_key))
     max_tokens = Keyword.get(options, :max_tokens, @default_max_tokens)
 
     body = build_request_body(messages, model, max_tokens, system_prompt)
     Logger.debug("AnthropicClient request body built", model: model, max_tokens: max_tokens)
 
-    case make_request(api_key, body) do
+    case make_request(api_key, body, options) do
       {:ok, response} ->
         extract_text_response(response)
 
@@ -75,7 +78,7 @@ defmodule SysDesignWiz.LLM.AnthropicClient do
 
   defp do_chat_with_tools(api_key, messages, tools, options) do
     system_prompt = Keyword.get(options, :system_prompt)
-    model = Keyword.get(options, :model, @default_model)
+    model = Keyword.get(options, :model, default_model(api_key))
     max_tokens = Keyword.get(options, :max_tokens, @default_max_tokens)
 
     body =
@@ -83,7 +86,7 @@ defmodule SysDesignWiz.LLM.AnthropicClient do
       |> build_request_body(model, max_tokens, system_prompt)
       |> Map.put("tools", format_tools(tools))
 
-    case make_request(api_key, body) do
+    case make_request(api_key, body, options) do
       {:ok, response} ->
         parse_tool_response(response)
 
@@ -160,7 +163,7 @@ defmodule SysDesignWiz.LLM.AnthropicClient do
     Map.get(map, key) || Map.get(map, Atom.to_string(key))
   end
 
-  defp make_request(api_key, body) do
+  defp make_request(api_key, body, options) do
     Logger.info("AnthropicClient.make_request starting",
       url: @api_url,
       api_key_length: String.length(api_key),
@@ -169,20 +172,10 @@ defmodule SysDesignWiz.LLM.AnthropicClient do
 
     start_time = System.monotonic_time(:millisecond)
 
-    headers = [
-      {"x-api-key", api_key},
-      {"anthropic-version", @api_version},
-      {"content-type", "application/json"}
-    ]
+    # Injection seam for tests; defaults to Req.post/2 in production.
+    post_fun = Keyword.get(options, :http_post, &Req.post/2)
 
-    Logger.debug("AnthropicClient about to call Req.post")
-
-    result =
-      Req.post(@api_url,
-        headers: headers,
-        json: body,
-        receive_timeout: 60_000
-      )
+    result = post_with_model_heal(api_key, body, post_fun)
 
     elapsed = System.monotonic_time(:millisecond) - start_time
 
@@ -205,6 +198,54 @@ defmodule SysDesignWiz.LLM.AnthropicClient do
         {:error, {:request_failed, reason}}
     end
   end
+
+  # Builds the Req request struct for a POST to the messages endpoint.
+  defp req(api_key) do
+    Req.new(
+      url: @api_url,
+      headers: [
+        {"x-api-key", api_key},
+        {"anthropic-version", @api_version},
+        {"content-type", "application/json"}
+      ],
+      receive_timeout: 60_000
+    )
+  end
+
+  # The default model is resolved (newest Sonnet) per the global key by the
+  # ModelResolver, so a retired dated id is never hardcoded here.
+  defp default_model(api_key) do
+    ModelResolver.latest_model(api_key, "sonnet")
+  end
+
+  # Sends the request; on a 404 not_found_error (the requested model was retired)
+  # re-resolves the newest model of the same tier and retries ONCE with it.
+  defp post_with_model_heal(api_key, body, post_fun) do
+    result = post_fun.(req(api_key), json: body)
+
+    case result do
+      {:ok, %Req.Response{status: 404, body: resp_body}} ->
+        heal_post_404(api_key, body, post_fun, result, resp_body)
+
+      _ ->
+        result
+    end
+  end
+
+  defp heal_post_404(api_key, body, post_fun, original_result, resp_body) do
+    model = body["model"]
+
+    with true <- model_not_found?(resp_body) and is_binary(model),
+         new_model when new_model != model <- ModelResolver.refresh_and_latest(api_key, model) do
+      Logger.warning("[anthropic_client] model #{model} not found; retrying with #{new_model}")
+      post_fun.(req(api_key), json: Map.put(body, "model", new_model))
+    else
+      _ -> original_result
+    end
+  end
+
+  defp model_not_found?(%{"error" => %{"type" => "not_found_error"}}), do: true
+  defp model_not_found?(_), do: false
 
   defp extract_text_response(%{"content" => content}) when is_list(content) do
     text =

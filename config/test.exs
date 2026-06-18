@@ -19,6 +19,10 @@ config :sys_design_wiz, SysDesignWizWeb.Endpoint,
 config :sys_design_wiz, :llm_client, SysDesignWiz.LLM.MockClient
 config :sys_design_wiz, :spacex_client, SysDesignWiz.SpaceX.MockClient
 
+# Disable the evergreen model resolver's network fetch in tests; it serves its
+# pinned per-tier fallbacks instead of hitting Anthropic's /v1/models endpoint.
+config :sys_design_wiz, SysDesignWiz.LLM.ModelResolver, enabled: false
+
 # Configure ClaudeCode.Test adapter for stubbing SDK calls
 config :claude_code, adapter: {ClaudeCode.Test, ClaudeCode}
 
