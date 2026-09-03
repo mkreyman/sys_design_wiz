@@ -76,14 +76,20 @@ defmodule SysDesignWiz.LLM.ModelResolver do
   def refresh_and_latest(api_key, tier) when is_binary(api_key) do
     t = tier_key(tier)
 
-    # Drop the cached entry BEFORE re-fetching. The only caller is the client's
-    # 404 handler, which is here precisely because the cached id no longer
-    # exists, and it decides whether to retry by comparing the returned id
-    # against the one that failed. Falling back to the cache hands that dead id
-    # straight back, the comparison finds no change, and the self-heal becomes a
-    # no-op — in exactly the case it exists for, a retirement during an outage
-    # of /v1/models.
-    forget(api_key)
+    # Drop THIS TIER's cached entry before re-fetching. The only caller is the
+    # client's 404 handler, which is here precisely because the cached id no
+    # longer exists, and it decides whether to retry by comparing the returned
+    # id against the one that failed. Falling back to the cache hands that dead
+    # id straight back, the comparison finds no change, and the self-heal
+    # becomes a no-op — in exactly the case it exists for, a retirement during
+    # an outage of /v1/models.
+    #
+    # Only this tier: the others were not proven dead by anything. This app has
+    # ONE global key, so purging all three would empty the whole cache, and a
+    # Sonnet retirement during a /v1/models outage would then push Haiku traffic
+    # off its live cached id onto the pinned claude-haiku-4-5-20251001 — a dated
+    # id, which is the failure this module exists to prevent.
+    forget(api_key, t)
 
     case do_fetch_and_cache(api_key) do
       {:ok, by_tier} -> Map.get(by_tier, t) || fallback(t)
@@ -97,6 +103,14 @@ defmodule SysDesignWiz.LLM.ModelResolver do
     if pid = Process.whereis(__MODULE__), do: GenServer.cast(pid, {:refresh, api_key})
     :ok
   end
+
+  @doc """
+  The pinned fallback per tier. Public so tests can assert against it rather
+  than spelling the ids out: a literal in a test turns a fallback refresh into
+  a red suite, which invites "fixing" it by reverting the refresh.
+  """
+  @spec fallbacks() :: %{String.t() => String.t()}
+  def fallbacks, do: @fallbacks
 
   @doc "Derives the tier (sonnet, opus or haiku) from a model id."
   @spec tier_of(String.t()) :: String.t()
@@ -114,7 +128,20 @@ defmodule SysDesignWiz.LLM.ModelResolver do
 
   @impl GenServer
   def handle_cast({:refresh, api_key}, %{enabled: true} = state) do
-    do_fetch_and_cache(api_key)
+    # latest_model/2 casts on EVERY miss, so a cold cache under load piles
+    # identical casts into this mailbox and each one blocks 10s on Req.get,
+    # serialized. Two guards: skip when the cache is already fresh (the first
+    # cast of a burst refreshes and the rest collapse to no-ops), and back off
+    # after a failure so a /v1/models outage cannot turn every request into
+    # another 10s attempt. Neither was needed before refresh_and_latest/2 began
+    # purging, which is what makes a miss recur.
+    if refresh_warranted?(api_key) do
+      case do_fetch_and_cache(api_key) do
+        {:ok, _} -> delete(:last_failure)
+        {:error, _} -> insert(:last_failure, now_ms())
+      end
+    end
+
     {:noreply, state}
   end
 
@@ -122,14 +149,57 @@ defmodule SysDesignWiz.LLM.ModelResolver do
 
   # -- Internals --
 
+  @failure_backoff_ms :timer.minutes(1)
+
+  defp refresh_warranted?(api_key) do
+    not in_backoff?() and cache_stale?(api_key)
+  end
+
+  defp in_backoff? do
+    case lookup(:last_failure) do
+      {:ok, ts} when is_integer(ts) -> now_ms() - ts < @failure_backoff_ms
+      _ -> false
+    end
+  end
+
+  # Warranted only if some tier is missing or past its TTL. Once a fetch writes
+  # fresh timestamps for every tier it found, queued duplicate casts short-circuit.
+  defp cache_stale?(api_key) do
+    fp = fingerprint(api_key)
+
+    Enum.any?(@tiers, fn tier ->
+      case lookup({fp, tier}) do
+        {:ok, {_model, ts}} -> stale?(ts)
+        :error -> true
+      end
+    end)
+  end
+
   defp do_fetch_and_cache(api_key) do
     if enabled?() do
-      case fetch_models(api_key) do
-        {:ok, data} -> cache_models(api_key, data)
-        {:error, reason} -> {:error, reason}
-      end
+      do_fetch_and_cache(api_key, &Req.get/2)
     else
       {:error, :disabled}
+    end
+  end
+
+  @doc """
+  Fetches `/v1/models` through `http_get` and caches the newest id per tier.
+  Unlike the private path this is NOT gated by the `:enabled` config: supplying
+  a getter is an explicit request to fetch, so a test can drive the whole
+  fetch/select/cache pipeline — including a non-200 and a transport error, which
+  had no coverage at all — while production stays disabled in test.
+  """
+  @spec refresh_and_cache(String.t(), (String.t(), keyword() -> term())) ::
+          {:ok, %{String.t() => String.t()}} | {:error, term()}
+  def refresh_and_cache(api_key, http_get) when is_binary(api_key) and is_function(http_get, 2) do
+    do_fetch_and_cache(api_key, http_get)
+  end
+
+  defp do_fetch_and_cache(api_key, http_get) do
+    case fetch_models(api_key, http_get) do
+      {:ok, data} -> cache_models(api_key, data)
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -172,8 +242,8 @@ defmodule SysDesignWiz.LLM.ModelResolver do
     end
   end
 
-  defp fetch_models(api_key) do
-    case Req.get(@models_url,
+  defp fetch_models(api_key, http_get) do
+    case http_get.(@models_url,
            headers: [{"x-api-key", api_key}, {"anthropic-version", @anthropic_version}],
            retry: false,
            receive_timeout: @http_timeout
@@ -195,10 +265,7 @@ defmodule SysDesignWiz.LLM.ModelResolver do
   defp tier_key(tier) when is_atom(tier), do: tier_key(Atom.to_string(tier))
   defp tier_key(model) when is_binary(model), do: tier_of(model)
 
-  defp forget(api_key) do
-    fp = fingerprint(api_key)
-    Enum.each(@tiers, fn tier -> delete({fp, tier}) end)
-  end
+  defp forget(api_key, tier), do: delete({fingerprint(api_key), tier})
 
   defp delete(key) do
     :ets.delete(@table, key)
