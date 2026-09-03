@@ -20,7 +20,9 @@ defmodule SysDesignWiz.LLM.AnthropicClientHealTest do
       end
     end)
 
-    :ok
+    # Ask the resolver what a cold cache resolves Sonnet to, rather than writing
+    # the id out. Fetching is disabled in test, so this is the pinned fallback.
+    {:ok, sonnet_fallback: SysDesignWiz.LLM.ModelResolver.latest_model("sk-test", "sonnet")}
   end
 
   defp not_found_404(model) do
@@ -35,7 +37,8 @@ defmodule SysDesignWiz.LLM.AnthropicClientHealTest do
     {:ok, %Req.Response{status: 200, body: %{"content" => [%{"type" => "text", "text" => "hi"}]}}}
   end
 
-  test "chat self-heals a 404 not_found by retrying with a re-resolved model" do
+  test "chat self-heals a 404 not_found by retrying with a re-resolved model",
+       %{sonnet_fallback: sonnet_fallback} do
     test_pid = self()
     {:ok, agent} = Agent.start_link(fn -> 0 end)
 
@@ -52,12 +55,14 @@ defmodule SysDesignWiz.LLM.AnthropicClientHealTest do
              )
 
     # First attempt used the retired model; the retry used the resolved newest
-    # Sonnet (the resolver's test fallback).
+    # Sonnet. Asked of the resolver rather than written as a literal: pinning
+    # the fallback's spelling here is what made a fallback refresh look like a
+    # test failure, which invites "fix" by reverting the refresh.
     assert_received {:posted, 0, "claude-sonnet-4-20250514"}
-    assert_received {:posted, 1, "claude-sonnet-4-6"}
+    assert_received {:posted, 1, ^sonnet_fallback}
   end
 
-  test "chat_with_tools self-heals a 404 not_found" do
+  test "chat_with_tools self-heals a 404 not_found", %{sonnet_fallback: sonnet_fallback} do
     test_pid = self()
     {:ok, agent} = Agent.start_link(fn -> 0 end)
 
@@ -81,10 +86,11 @@ defmodule SysDesignWiz.LLM.AnthropicClientHealTest do
                http_post: post_fun
              )
 
-    assert_received {:posted, 1, "claude-sonnet-4-6"}
+    assert_received {:posted, 1, ^sonnet_fallback}
   end
 
-  test "a 404 that is NOT a model not_found is returned as an error (no retry)" do
+  test "a 404 that is NOT a model not_found is returned as an error (no retry)",
+       %{sonnet_fallback: sonnet_fallback} do
     test_pid = self()
 
     post_fun = fn _req, opts ->
@@ -94,12 +100,12 @@ defmodule SysDesignWiz.LLM.AnthropicClientHealTest do
 
     assert {:error, _} =
              AnthropicClient.chat([%{role: "user", content: "hi"}],
-               model: "claude-sonnet-4-6",
+               model: sonnet_fallback,
                http_post: post_fun
              )
 
     # Only one attempt — no heal retry for a non-model 404.
-    assert_received {:posted, "claude-sonnet-4-6"}
+    assert_received {:posted, ^sonnet_fallback}
     refute_received {:posted, _other}
   end
 end

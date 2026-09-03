@@ -34,8 +34,8 @@ defmodule SysDesignWiz.LLM.ModelResolver do
   # Current, verified-good fallback per tier (used only on a cold cache or a
   # failed fetch). Keep these pointed at models that currently exist.
   @fallbacks %{
-    "sonnet" => "claude-sonnet-4-6",
-    "opus" => "claude-opus-4-8",
+    "sonnet" => "claude-sonnet-5",
+    "opus" => "claude-opus-5",
     "haiku" => "claude-haiku-4-5-20251001"
   }
 
@@ -68,19 +68,26 @@ defmodule SysDesignWiz.LLM.ModelResolver do
 
   @doc """
   Forces a fresh `/v1/models` fetch for `api_key` and returns the newest model of
-  the tier. On fetch failure, falls back to any cached value, then the pinned
-  fallback. Blocking — intended for the 404 self-heal path only.
+  the tier. On fetch failure, falls back to the PINNED id — deliberately not to
+  the cached one, which is the id that just 404'd. Blocking; intended for the
+  404 self-heal path only.
   """
   @spec refresh_and_latest(String.t(), atom() | String.t()) :: String.t()
   def refresh_and_latest(api_key, tier) when is_binary(api_key) do
     t = tier_key(tier)
 
-    case do_fetch_and_cache(api_key) do
-      {:ok, by_tier} ->
-        Map.get(by_tier, t) || cached_or_fallback(api_key, t)
+    # Drop the cached entry BEFORE re-fetching. The only caller is the client's
+    # 404 handler, which is here precisely because the cached id no longer
+    # exists, and it decides whether to retry by comparing the returned id
+    # against the one that failed. Falling back to the cache hands that dead id
+    # straight back, the comparison finds no change, and the self-heal becomes a
+    # no-op — in exactly the case it exists for, a retirement during an outage
+    # of /v1/models.
+    forget(api_key)
 
-      {:error, _} ->
-        cached_or_fallback(api_key, t)
+    case do_fetch_and_cache(api_key) do
+      {:ok, by_tier} -> Map.get(by_tier, t) || fallback(t)
+      {:error, _} -> fallback(t)
     end
   end
 
@@ -115,13 +122,6 @@ defmodule SysDesignWiz.LLM.ModelResolver do
 
   # -- Internals --
 
-  defp cached_or_fallback(api_key, tier) do
-    case lookup({fingerprint(api_key), tier}) do
-      {:ok, {model, _ts}} -> model
-      :error -> fallback(tier)
-    end
-  end
-
   defp do_fetch_and_cache(api_key) do
     if enabled?() do
       case fetch_models(api_key) do
@@ -133,7 +133,17 @@ defmodule SysDesignWiz.LLM.ModelResolver do
     end
   end
 
-  defp cache_models(api_key, data) do
+  @doc """
+  Caches the newest id per tier from a `/v1/models` `data` list, without
+  fetching. Public for testing: `config/test.exs` disables fetching, so without
+  a way to seed the cache a test can only ever exercise the cache-COLD path —
+  which is how the `refresh_and_latest/2` regression covered below reached
+  master with a green suite.
+  """
+  @spec cache_models(String.t(), [map()]) :: {:ok, %{String.t() => String.t()}}
+  def cache_models(api_key, data)
+
+  def cache_models(api_key, data) when is_binary(api_key) and is_list(data) do
     fp = fingerprint(api_key)
     now = now_ms()
 
@@ -184,6 +194,18 @@ defmodule SysDesignWiz.LLM.ModelResolver do
   defp tier_key(tier) when tier in @tiers, do: tier
   defp tier_key(tier) when is_atom(tier), do: tier_key(Atom.to_string(tier))
   defp tier_key(model) when is_binary(model), do: tier_of(model)
+
+  defp forget(api_key) do
+    fp = fingerprint(api_key)
+    Enum.each(@tiers, fn tier -> delete({fp, tier}) end)
+  end
+
+  defp delete(key) do
+    :ets.delete(@table, key)
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
 
   defp fallback(tier), do: Map.get(@fallbacks, tier, @fallbacks["sonnet"])
 
