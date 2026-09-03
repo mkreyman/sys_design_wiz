@@ -24,9 +24,16 @@ defmodule SysDesignWiz.LLM.AnthropicClient do
 
   require Logger
 
+  alias SysDesignWiz.LLM.ModelResolver
+
   @api_url "https://api.anthropic.com/v1/messages"
   @api_version "2023-06-01"
-  @default_model "claude-sonnet-4-20250514"
+  # A TIER, not an id. The pinned default here used to be
+  # "claude-sonnet-4-20250514", which Anthropic retired on 2026-06-15 — after
+  # which every call this module made would have 404'd, with the error naming
+  # nothing that pointed back to this line. ModelResolver turns the tier into
+  # the newest live id; see its moduledoc.
+  @default_tier :sonnet
   @default_max_tokens 4096
 
   @impl true
@@ -58,13 +65,13 @@ defmodule SysDesignWiz.LLM.AnthropicClient do
   defp do_chat(api_key, messages, options) do
     Logger.info("AnthropicClient.do_chat starting", message_count: length(messages))
     system_prompt = Keyword.get(options, :system_prompt)
-    model = Keyword.get(options, :model, @default_model)
+    model = resolve_model(api_key, options)
     max_tokens = Keyword.get(options, :max_tokens, @default_max_tokens)
 
-    body = build_request_body(messages, model, max_tokens, system_prompt)
+    build = fn m -> build_request_body(messages, m, max_tokens, system_prompt) end
     Logger.debug("AnthropicClient request body built", model: model, max_tokens: max_tokens)
 
-    case make_request(api_key, body) do
+    case request_healing_retired_model(api_key, model, build) do
       {:ok, response} ->
         extract_text_response(response)
 
@@ -75,20 +82,54 @@ defmodule SysDesignWiz.LLM.AnthropicClient do
 
   defp do_chat_with_tools(api_key, messages, tools, options) do
     system_prompt = Keyword.get(options, :system_prompt)
-    model = Keyword.get(options, :model, @default_model)
+    model = resolve_model(api_key, options)
     max_tokens = Keyword.get(options, :max_tokens, @default_max_tokens)
 
-    body =
+    build = fn m ->
       messages
-      |> build_request_body(model, max_tokens, system_prompt)
+      |> build_request_body(m, max_tokens, system_prompt)
       |> Map.put("tools", format_tools(tools))
+    end
 
-    case make_request(api_key, body) do
+    case request_healing_retired_model(api_key, model, build) do
       {:ok, response} ->
         parse_tool_response(response)
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  # An explicit :model option still wins — a caller naming a model means it.
+  defp resolve_model(api_key, options) do
+    case Keyword.get(options, :model) do
+      nil -> ModelResolver.latest_model(api_key, @default_tier)
+      model -> model
+    end
+  end
+
+  # Anthropic's "that model is gone" is a 404, and it is the one API error worth
+  # retrying: re-resolve the tier and go again once. Without this, a retirement
+  # landing inside the resolver's 24h cache window fails every call until the
+  # cache expires. Guarded against a loop — if the fresh id is the one that just
+  # 404'd, the original error stands.
+  defp request_healing_retired_model(api_key, model, build) do
+    case make_request(api_key, build.(model)) do
+      {:error, {:api_error, 404, message}} = error ->
+        fresh = ModelResolver.refresh_and_latest(api_key, model)
+
+        if fresh == model do
+          error
+        else
+          Logger.warning(
+            "[AnthropicClient] model #{model} is gone (#{message}); retrying on #{fresh}"
+          )
+
+          make_request(api_key, build.(fresh))
+        end
+
+      result ->
+        result
     end
   end
 

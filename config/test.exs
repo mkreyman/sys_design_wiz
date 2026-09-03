@@ -15,6 +15,10 @@ config :sys_design_wiz, SysDesignWizWeb.Endpoint,
     "test_secret_key_base_needs_to_be_at_least_64_bytes_long_for_security_purposes",
   server: false
 
+# Never fetch /v1/models from the suite: the resolver then serves its pinned
+# fallbacks, so tests are deterministic and need no API key.
+config :sys_design_wiz, SysDesignWiz.LLM.ModelResolver, enabled: false
+
 # Use mock clients in tests
 config :sys_design_wiz, :llm_client, SysDesignWiz.LLM.MockClient
 config :sys_design_wiz, :spacex_client, SysDesignWiz.SpaceX.MockClient
